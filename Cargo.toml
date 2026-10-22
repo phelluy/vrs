@@ -1,0 +1,12 @@
+[package]
+name = "vrs"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal distraction-free editor for learning programming"
+
+[dependencies]
+eframe = "0.36"
+egui = "0.36"
+egui_code_editor = "0.4"
+portable-pty = "0.9"
+vt100 = "0.18.1"
