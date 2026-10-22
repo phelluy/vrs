@@ -111,6 +111,18 @@ fn temp_path(path: &Path) -> PathBuf {
     path.with_file_name(format!(".vrs-lint-{}.{ext}", std::process::id()))
 }
 
+/// Options shared by the lint run and the test that exercises it against the
+/// system compiler. No `-fdiagnostics-plain-output`: Apple clang ships as
+/// `g++` on macOS and rejects that flag without linting the file at all.
+/// `LC_ALL=C` plus `-fno-diagnostics-color` keep the output plain on both GCC
+/// and clang.
+const GXX_FLAGS: &[&str] = &[
+    "-fsyntax-only",
+    "-fno-diagnostics-color",
+    "-Wall",
+    "-Wextra",
+];
+
 fn spawn(path: &Path, text: &str) -> Receiver<(String, Vec<Diagnostic>)> {
     let (tx, rx) = mpsc::channel();
     let path = path.to_path_buf();
@@ -120,13 +132,7 @@ fn spawn(path: &Path, text: &str) -> Receiver<(String, Vec<Diagnostic>)> {
         let mut diagnostics = Vec::new();
         if std::fs::write(&temp, &text).is_ok() {
             let output = std::process::Command::new("g++")
-                .args([
-                    "-fsyntax-only",
-                    "-fdiagnostics-plain-output",
-                    "-fno-diagnostics-color",
-                    "-Wall",
-                    "-Wextra",
-                ])
+                .args(GXX_FLAGS)
                 .arg(&temp)
                 .env("LC_ALL", "C")
                 .output();
@@ -181,7 +187,7 @@ fn parse(stderr: &str, temp: &Path) -> Vec<Diagnostic> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Diagnostic};
+    use super::{parse, Diagnostic, GXX_FLAGS};
     use std::path::Path;
 
     #[test]
@@ -212,5 +218,38 @@ other.cpp:1:1: error: not our file
     #[test]
     fn ignores_a_missing_compiler_output() {
         assert!(parse("", Path::new("/tmp/.vrs-lint-1.cpp")).is_empty());
+    }
+
+    /// End-to-end: the flags we pass must be accepted by whatever compiler
+    /// answers to `g++` (GCC on Linux, Apple clang on macOS) and its output
+    /// must parse. Skips silently when no C++ compiler is installed.
+    #[test]
+    fn the_system_compiler_lints_and_the_output_parses() {
+        let dir = std::env::temp_dir().join(format!("vrs-lint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("probe.cpp");
+        std::fs::write(&path, "int main() { return x; }\n").expect("write");
+        let output = std::process::Command::new("g++")
+            .args(GXX_FLAGS)
+            .arg(&path)
+            .env("LC_ALL", "C")
+            .output();
+        let _ = std::fs::remove_file(&path);
+        let Ok(output) = output else {
+            return; // no compiler on this machine
+        };
+        assert!(
+            output.status.success() || !output.stderr.is_empty(),
+            "the compiler failed without explaining why"
+        );
+        let found = parse(&String::from_utf8_lossy(&output.stderr), &path);
+        assert!(
+            !found.is_empty(),
+            "no diagnostic parsed from:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(found[0].line, 1);
+        assert!(!found[0].warning);
+        assert!(found[0].column >= 1);
     }
 }
