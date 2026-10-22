@@ -103,25 +103,27 @@ impl FilePanel {
         ui.add_space(4.0);
 
         // The tree scrolls when it is taller than the panel.
-        egui::ScrollArea::vertical().auto_shrink(true).show(ui, |ui| {
-            // Inline creation at the root level.
-            if self
-                .create
-                .as_ref()
-                .is_some_and(|(parent, _, _)| parent == &self.root)
-            {
-                self.draw_create_row(ui);
-            }
+        egui::ScrollArea::vertical()
+            .auto_shrink(true)
+            .show(ui, |ui| {
+                // Inline creation at the root level.
+                if self
+                    .create
+                    .as_ref()
+                    .is_some_and(|(parent, _, _)| parent == &self.root)
+                {
+                    self.draw_create_row(ui);
+                }
 
-            // Move the tree out instead of cloning it every frame: the
-            // drawing only needs a shared borrow, which `self` cannot give
-            // while `&mut self` methods run inside the loop.
-            let tree = std::mem::take(&mut self.tree);
-            for entry in &tree {
-                self.draw_entry(ui, entry);
-            }
-            self.tree = tree;
-        });
+                // Move the tree out instead of cloning it every frame: the
+                // drawing only needs a shared borrow, which `self` cannot give
+                // while `&mut self` methods run inside the loop.
+                let tree = std::mem::take(&mut self.tree);
+                for entry in &tree {
+                    self.draw_entry(ui, entry);
+                }
+                self.tree = tree;
+            });
 
         // Background (below the tree when it is short): click and
         // right-click, and drop target for the root.
@@ -261,9 +263,7 @@ impl FilePanel {
             }
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 confirm = true;
-            } else if response.lost_focus()
-                || ui.input(|i| i.key_pressed(egui::Key::Escape))
-            {
+            } else if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
         });
@@ -306,10 +306,7 @@ impl FilePanel {
             return;
         }
         if fs::rename(&src, &dst).is_ok() {
-            self.actions.push(Action::Moved {
-                from: src,
-                to: dst,
-            });
+            self.actions.push(Action::Moved { from: src, to: dst });
             self.schedule_rescan();
         }
     }

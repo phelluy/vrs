@@ -12,7 +12,10 @@ pub const NEW_FOLDER: &str = "New Folder";
 pub const MODIFIED: &str = "modified";
 pub const CANT_OPEN: &str = "Cannot open";
 pub const CANT_SAVE: &str = "Cannot save";
-pub const NO_FILE_OPEN: &str = "No file open.\nClick a file in the panel on the left,\nor right-click to create one.";
+pub const FORMAT_SELECTION: &str = "Format selection";
+pub const CANT_FORMAT: &str = "Cannot format";
+pub const NO_FILE_OPEN: &str =
+    "No file open.\nClick a file in the panel on the left,\nor right-click to create one.";
 pub const SAVE_CHANGES: &str = "Save changes";
 pub const UNSAVED_CHANGES: &str = "Unsaved changes in";
 pub const QUIT_TITLE: &str = "Quit with unsaved changes?";

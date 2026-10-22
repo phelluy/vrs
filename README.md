@@ -11,6 +11,8 @@ under `~/.vrs`, a syntax-highlighted editor, and a real terminal.
   warnings in yellow behind the identifier, message on hover.
 - Real terminal (PTY passthrough, `vt100` emulation): colours, `Tab`
   completion, `Ctrl+C`, mouse-wheel scrolling, bracketed paste.
+- Right-click in the editor to format the selected lines with the system
+  `clang-format` (`--lines`, so only the selection is rewritten).
 
 ## Build and run
 
@@ -18,7 +20,9 @@ under `~/.vrs`, a syntax-highlighted editor, and a real terminal.
 cargo run --release
 ```
 
-Needs `g++` on `PATH` for the diagnostics. Linux first; other systems later.
+Needs `g++` on `PATH` for the diagnostics and `clang-format` for the formatter
+(both are the tools a student already uses in the terminal). Linux first;
+other systems later.
 
 ## Keys
 

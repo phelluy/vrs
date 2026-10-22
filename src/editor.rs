@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use egui::Ui;
 use egui_code_editor::{CodeEditor, ColorTheme};
 
-use crate::diagnostics::Linter;
+use crate::diagnostics::{self, Linter};
+use crate::format;
 use crate::strings as s;
 use crate::syntax;
 
@@ -25,6 +26,10 @@ pub struct Editor {
     /// header instead of failing silently.
     error: Option<String>,
     linter: Linter,
+    /// Last non-empty selection, as character indices.
+    selection: Option<(usize, usize)>,
+    /// Caret position to restore once the formatting is done.
+    collapse_to: Option<usize>,
 }
 
 impl Editor {
@@ -35,6 +40,8 @@ impl Editor {
             saved_text: String::new(),
             error: None,
             linter: Linter::new(),
+            selection: None,
+            collapse_to: None,
         }
     }
 
@@ -45,10 +52,16 @@ impl Editor {
                 self.text = text;
                 self.saved_text = self.text.clone();
                 self.error = None;
+                self.selection = None;
+                self.collapse_to = None;
                 self.linter.reset();
             }
             Err(err) => {
-                self.error = Some(format!("{} {}: {err}", s::CANT_OPEN, Self::file_name(&path)))
+                self.error = Some(format!(
+                    "{} {}: {err}",
+                    s::CANT_OPEN,
+                    Self::file_name(&path)
+                ))
             }
         }
     }
@@ -58,6 +71,8 @@ impl Editor {
         self.text.clear();
         self.saved_text.clear();
         self.error = None;
+        self.selection = None;
+        self.collapse_to = None;
         self.linter.reset();
     }
 
@@ -150,10 +165,129 @@ impl Editor {
                                 .with_rows(rows);
                             let (output, _tokens) = code.show(ui, &mut self.text, &syntax);
                             self.draw_diagnostics(ui, &output);
+                            self.track_selection(ui, &output);
+                            self.format_menu(&output.response.response, path);
                         });
                     });
                 self.linter.update(ui.ctx(), path, &self.text);
             }
+        }
+    }
+
+    /// Right-click menu: hand the selected lines to `clang-format`.
+    fn format_menu(&mut self, response: &egui::Response, path: &Path) {
+        let selection = self.selection;
+        let cpp = diagnostics::supported(path);
+        response.context_menu(|ui| {
+            let selected = selection.is_some_and(|(start, end)| end > start);
+            let button = egui::Button::new(s::FORMAT_SELECTION);
+            if ui.add_enabled(cpp && selected, button).clicked() {
+                if let Some((start, end)) = selection {
+                    self.format_lines(start, end);
+                }
+                ui.close();
+            }
+        });
+    }
+
+    /// Remember the selection while it lasts.
+    ///
+    /// A right-click collapses the caret in egui (the text edit moves it to
+    /// the pointer on any press), and `TextEditOutput::cursor_range` is only
+    /// reported while the widget holds the keyboard focus, so the menu reads
+    /// the range kept in the widget state on the frame before it opened.
+    fn track_selection(&mut self, ui: &Ui, output: &egui::text_edit::TextEditOutput) {
+        let id = output.response.response.id;
+        // A press elsewhere starts a new selection; keep the old one while a
+        // menu is open, otherwise clicking its item would clear it first.
+        let popup_open = egui::Popup::is_any_open(ui.ctx());
+        let pressed = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
+        if !popup_open && pressed {
+            self.selection = None;
+        }
+        if let Some(range) = output.state.cursor.char_range() {
+            let (a, b): (usize, usize) = (range.primary.index.into(), range.secondary.index.into());
+            if a != b {
+                self.selection = Some((a.min(b), a.max(b)));
+            }
+        }
+        if let Some(index) = self.collapse_to.take() {
+            self.selection = None;
+            let index = index.min(self.text.chars().count());
+            self.set_cursor(ui, id, index);
+            return;
+        }
+        // Put the range back when the right-click landed inside it: egui
+        // drops the highlight on any press, while an editor keeps it.
+        // Right-clicking elsewhere still moves the caret, as usual.
+        let right_click = ui.input(|i| {
+            i.pointer.button_pressed(egui::PointerButton::Secondary)
+                || i.pointer.button_released(egui::PointerButton::Secondary)
+        });
+        if right_click {
+            if let Some((start, end)) = self.selection {
+                let caret = output
+                    .state
+                    .cursor
+                    .char_range()
+                    .map(|range| usize::from(range.primary.index));
+                if caret.is_none_or(|caret| start <= caret && caret <= end) {
+                    self.set_selection(ui, id, start, end);
+                }
+            }
+        }
+    }
+
+    /// Write a character range back into the text edit, so the highlight
+    /// follows the text and not just the caret.
+    fn set_selection(&self, ui: &Ui, id: egui::Id, start: usize, end: usize) {
+        self.set_range(
+            ui,
+            id,
+            egui::text::CCursorRange::two(
+                egui::text::CCursor::new(start),
+                egui::text::CCursor::new(end),
+            ),
+        );
+    }
+
+    /// Leave a single caret at `index`, without any selection.
+    fn set_cursor(&self, ui: &Ui, id: egui::Id, index: usize) {
+        self.set_range(
+            ui,
+            id,
+            egui::text::CCursorRange::one(egui::text::CCursor::new(index)),
+        );
+    }
+
+    fn set_range(&self, ui: &Ui, id: egui::Id, range: egui::text::CCursorRange) {
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+        state.cursor.set_char_range(Some(range));
+        state.store(ui.ctx(), id);
+        // Without the focus egui collapses the range on the next frame.
+        ui.ctx().memory_mut(|memory| memory.request_focus(id));
+        ui.ctx().request_repaint();
+    }
+
+    /// Format the lines spanned by the character range `start..end`.
+    fn format_lines(&mut self, start: usize, end: usize) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let lines = self.text.lines().count().max(1);
+        let first = format::line_of(&self.text, start).min(lines);
+        // `end` is one past the last selected character.
+        let last = format::line_of(&self.text, end.saturating_sub(1).max(start));
+        let last = last.max(first).min(lines);
+        match format::format_range(&path, &self.text, first, last) {
+            Ok(text) => {
+                self.text = text;
+                self.error = None;
+                // The old range no longer matches the new text: leave a single
+                // caret where the selection used to end.
+                self.collapse_to = self.selection.map(|(_, end)| end);
+            }
+            Err(err) => self.error = Some(format!("{}: {err}", s::CANT_FORMAT)),
         }
     }
 
@@ -174,13 +308,17 @@ impl Editor {
             let Some(last) = glyphs.last() else {
                 continue;
             };
-            let first = (diagnostic.column.saturating_sub(1)).min(glyphs.len() - 1);
-            let start = glyphs[first].pos.x;
+            // Past the end of a short line, clamp to its last character.
+            let first = diagnostic.column.saturating_sub(1);
+            let Some(glyph) = glyphs.get(first).or(glyphs.last()) else {
+                continue;
+            };
+            let start = glyph.pos.x;
             // The compiler gives the start column only: mark the whole
             // identifier when the diagnostic points at one.
             let is_word = |c: char| c.is_alphanumeric() || c == '_';
-            let mut last_index = first;
-            if is_word(glyphs[first].chr) {
+            let mut last_index = glyphs.len().saturating_sub(1).min(first);
+            if is_word(glyph.chr) {
                 while let Some(next) = glyphs.get(last_index + 1) {
                     if !is_word(next.chr) {
                         break;

@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use egui::Ui;
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
 const SCROLLBACK_CAPACITY: usize = 10_000;
 
@@ -98,10 +98,11 @@ impl Terminal {
                 match reader.read(&mut chunk) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
+                        let Some(bytes) = chunk.get(..n) else { break };
                         parser
                             .lock()
                             .unwrap_or_else(|err| err.into_inner())
-                            .process(&chunk[..n]);
+                            .process(bytes);
                         // New shell output must trigger a repaint: egui is
                         // reactive and would otherwise never show it.
                         ctx.request_repaint();
@@ -144,10 +145,8 @@ impl Terminal {
             ui.fonts_mut(|f| (f.glyph_width(&font_id, 'M'), f.row_height(&font_id)));
 
         // Drag handle along the top edge, to resize the panel.
-        let (_, handle) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 6.0),
-            egui::Sense::drag(),
-        );
+        let (_, handle) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), egui::Sense::drag());
         let handle = handle.on_hover_cursor(egui::CursorIcon::ResizeNorth);
         let mut drag_delta = None;
         if handle.dragged() {
@@ -193,8 +192,7 @@ impl Terminal {
                 for run in row_runs(screen, row, screen_cols, fg, bg) {
                     // egui has no bold face for the monospace family, so SGR
                     // bold is left as colour only.
-                    let mut format =
-                        egui::text::TextFormat::simple(font_id.clone(), run.color);
+                    let mut format = egui::text::TextFormat::simple(font_id.clone(), run.color);
                     if run.background != bg {
                         format.background = run.background;
                     }
@@ -217,8 +215,7 @@ impl Terminal {
         // panel: the shell draws the command line itself through the PTY,
         // we only route the keys to it. A plain interact widget (not a
         // TextEdit) so nothing is rendered when focused.
-        let capture_rect =
-            egui::Rect::from_min_size(panel_rect.left_top(), egui::vec2(1.0, 1.0));
+        let capture_rect = egui::Rect::from_min_size(panel_rect.left_top(), egui::vec2(1.0, 1.0));
         let capture_id = egui::Id::new("vrs-terminal-capture");
         let response = ui.interact(capture_rect, capture_id, egui::Sense::click());
         ui.ctx().memory_mut(|m| {
@@ -308,7 +305,7 @@ impl Drop for Terminal {
 }
 
 fn nz(n: u16) -> NonZeroU16 {
-    NonZeroU16::new(n.max(1)).expect("nonzero")
+    NonZeroU16::new(n).unwrap_or(NonZeroU16::MIN)
 }
 
 /// A stretch of one screen row sharing the same attributes.
@@ -637,14 +634,8 @@ mod tests {
 
     #[test]
     fn palette_covers_base_and_cube() {
-        assert_eq!(
-            ansi_palette(1),
-            egui::Color32::from_rgb(0xcd, 0x00, 0x00)
-        );
-        assert_eq!(
-            ansi_palette(196),
-            egui::Color32::from_rgb(0xff, 0x00, 0x00)
-        );
+        assert_eq!(ansi_palette(1), egui::Color32::from_rgb(0xcd, 0x00, 0x00));
+        assert_eq!(ansi_palette(196), egui::Color32::from_rgb(0xff, 0x00, 0x00));
         assert_eq!(ansi_palette(255), egui::Color32::from_rgb(238, 238, 238));
     }
 }

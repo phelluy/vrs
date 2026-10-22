@@ -97,7 +97,7 @@ impl Linter {
     }
 }
 
-fn supported(path: &Path) -> bool {
+pub fn supported(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
         Some("cpp" | "cc" | "cxx" | "c" | "h" | "hpp" | "hh" | "hxx" | "ino")
@@ -181,7 +181,7 @@ fn parse(stderr: &str, temp: &Path) -> Vec<Diagnostic> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Diagnostic, parse};
+    use super::{parse, Diagnostic};
     use std::path::Path;
 
     #[test]

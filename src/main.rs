@@ -2,6 +2,7 @@ mod app;
 mod diagnostics;
 mod editor;
 mod files;
+mod format;
 mod strings;
 mod syntax;
 mod terminal;
