@@ -31,3 +31,85 @@ keep it simple and stupid, on recherche le minimalisme pas plusieurs façon de f
 - Hors périmètre pour l'instant : onglets multiples, git, debugueur,
   extensions, auto-complétion, parsing des diagnostics du compilateur
   (clic sur une erreur pour sauter à la ligne — envisagé plus tard).
+
+## clangd : options envisagées (23/10/2026)
+
+Constat : `/usr/bin/clangd` existe (Apple clangd 21.0.0, arm64, fourni par les
+Command Line Tools). On garde cette version système, pas de `llvm` Homebrew.
+Deux outils de la chaîne LLVM sont donc de versions différentes
+(`clang-format` 23.1.4 via Homebrew, clangd 21) : sans conséquence, chacun
+fait son travail.
+
+Ce que clangd apporterait que `g++ -fsyntax-only` ne donne pas : plages de
+soulignement exactes, notes et suggestions dans le message, diagnostics sur
+le buffer non sauvegardé sans passer par un fichier temporaire, hover réel
+sur les identifiants, aller à la définition. En contrepartie : un protocole
+(LSP) à parler, un processus persistant à gérer, et une dépendance système
+de plus.
+
+### Essai sans code
+
+```sh
+clangd --check=~/.vrs/projet/hello.cpp
+```
+
+Sort les diagnostics et les flags déduits, sans éditeur ni protocole. À faire
+avant d'écrire quoi que ce soit, pour comparer avec la sortie de `g++`.
+
+### Prérequis communs aux options qui parlent LSP
+
+- JSON-RPC sur stdio, trames `Content-Length: N\r\n\r\n{…}`. Soit à la main
+  avec `serde_json` seul, soit avec `lsp-server` + `lsp-types`.
+- Synchronisation en *full text* : on renvoie tout le buffer à `didChange`.
+  Les deltas incrémentaux ne sont pas nécessaires et compliquent tout.
+- Une instance par dossier de projet (une sous-dossier de `~/.vrs`), arrêt
+  propre (`shutdown`, `exit`, kill) au changement de projet et à la fermeture.
+- Un `.clangd` (dans `~/.vrs` ou par projet) pour retrouver les flags actuels,
+  que clangd n'utilise pas par défaut :
+  ```yaml
+  CompileFlags:
+    Add: [-Wall, -Wextra]
+  ```
+
+### Option A — clangd remplace le linter
+
+`Linter` garde sa forme (thread, canal, `update()` par frame), seul le
+lancement change : un clangd persistant au lieu d'un `g++` par frappe.
+`publishDiagnostics` remplace `parse()` ; `Diagnostic` reçoit `end_line` et
+`end_column` pour souligner la plage réelle au lieu de deviner la fin du mot.
+Disparaissent : l'anti-rebond maison (clangd gère son propre délai) et la
+copie cachée `.vrs-lint-*` (voir `temp_path`), puisque le texte part par
+`didChange`.
+
+Coût : ~250-350 lignes dans `diagnostics.rs`. Risque : les messages ne sont
+plus littéralement ceux de la compilation de l'étudiant, ce qui contredit
+l'argument actuel du module (« exactly the errors the student will meet »).
+
+### Option B — hybride
+
+Garder `g++` pour les diagnostics, ajouter clangd uniquement pour ce que le
+compilateur ne fait pas :
+
+- hover sur identifiant (`textDocument/hover`), ~60 lignes : `draw_diagnostics`
+  sait déjà convertir une position en glyphe, donc en offset ;
+- aller à la définition (`textDocument/definition`) sur Ctrl+clic, ~60 lignes :
+  la réponse est un chemin plus une plage, et `Editor::open` / `set_cursor`
+  existent déjà.
+
+Coût : deux processus à gérer, mais aucune régression sur les diagnostics et
+aucune réécriture de `diagnostics.rs`. C'est l'option à préférer si l'option A
+doit être évaluée avant d'être adoptée.
+
+### Option C — statu quo
+
+Rien n'est fait. On peut alors se contenter du point « envisagé plus tard » de
+la liste ci-dessus : clic sur une erreur pour sauter à la ligne, sans clangd.
+
+### Écarté pour rester minimaliste
+
+- Auto-complétion (`textDocument/completion`) : hors périmètre assumé, et
+  c'est le plus gros travail d'interface (popup ancré au curseur, filtré à la
+  frappe).
+- Coloration sémantique (`semanticTokens`) : concurrence directe avec
+  `egui_code_editor` et `syntax.rs`, gain faible.
+- `clang-tidy` : diagnostics de style dont un débutant ne sait rien faire.
