@@ -113,3 +113,40 @@ la liste ci-dessus : clic sur une erreur pour sauter à la ligne, sans clangd.
 - Coloration sémantique (`semanticTokens`) : concurrence directe avec
   `egui_code_editor` et `syntax.rs`, gain faible.
 - `clang-tidy` : diagnostics de style dont un débutant ne sait rien faire.
+
+## Décision du 23/10/2026 : option A, plus hover et définition
+
+Option A retenue, avec les deux fonctions de l'option B : puisque le serveur
+est là, autant lui demander aussi le survol et le saut à la définition.
+
+- `src/clangd.rs` (nouveau) : le transport LSP — trames `Content-Length`,
+  `initialize`/`initialized`, `didOpen`/`didChange` (texte complet)/
+  `didClose`, `hover`, `definition`, `publishDiagnostics`. Deux fils par
+  serveur (écriture vers stdin, lecture de stdout) ; les réponses passent par
+  un canal et réveillent egui (`request_repaint`), sinon l'éditeur resterait
+  inerte une fois la frappe finie.
+- `src/diagnostics.rs` devient `src/language.rs` : un clangd par projet (le
+  dossier juste sous `~/.vrs`), arrêt propre au changement de projet et à la
+  fermeture. `Diagnostic` gagne `end_line`/`end_column` : le soulignement suit
+  la plage exacte du serveur au lieu de deviner la fin du mot. Les
+  diagnostics publiés pour d'autres fichiers (en-têtes inclus) sont ignorés.
+- `src/editor.rs` : survol après 0,35 s d'immobilité du pointeur (une requête
+  par frame saturerait le serveur), Ctrl+clic sur un identifiant (Cmd+clic
+  sur macOS, où Ctrl+clic est le clic droit habituel : même règle que
+  Ctrl+S, qui devient Cmd+S). Un saut hors de `~/.vrs`
+  est ignoré : atterrir dans un en-tête système remplirait l'éditeur de
+  milliers de lignes et relancerait un serveur sur un autre projet. Avant un
+  saut vers un autre fichier, le tampon courant est enregistré.
+- `~/.vrs/.clangd` est écrit une fois s'il manque, pour retrouver
+  `-Wall -Wextra` : clangd n'active aucune alerte par défaut. Un `.clangd` de
+  projet s'y ajoute.
+- Une dépendance de plus : `serde_json`, et rien d'autre.
+
+Disparaissent : l'anti-rebond maison, la copie cachée `.vrs-lint-*` et
+l'appel à `g++` pour les diagnostics. `g++` reste indispensable au terminal :
+c'est l'étudiant qui compile. Écart assumé, comme prévu : les messages sont
+ceux de clang et non plus ceux de g++ (libellés voisins, `[-W…]` conservé en
+fin de message).
+
+Reste ouvert : clic sur une erreur pour sauter à la ligne. clangd donne déjà
+la plage, il ne manque que le clic.

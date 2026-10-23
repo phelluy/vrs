@@ -7,8 +7,11 @@ under `~/.vrs`, a syntax-highlighted editor, and a real terminal.
 
 - File panel rooted at `~/.vrs`: create files and folders, open, delete.
 - Editor with C++ syntax highlighting, line numbers, undo/redo (egui).
-- Compiler diagnostics from the system `g++`: errors highlighted in red,
-  warnings in yellow behind the identifier, message on hover.
+- C++ intelligence from the system `clangd`: errors underlined in red and
+  warnings in yellow, over the exact range the server points at, with the
+  message on hover; the documentation of the identifier under the pointer;
+  Ctrl+click (`Cmd+click` on macOS) to follow a definition, in this file or
+  another one of the project.
 - Real terminal (PTY passthrough, `vt100` emulation): colours, `Tab`
   completion, `Ctrl+C`, mouse-wheel scrolling, bracketed paste.
 - Right-click in the editor to format the selected lines with the system
@@ -25,14 +28,15 @@ script and no C library to compile, so no `cmake` or `pkg-config` needed.
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install g++ clang-format \
+sudo apt install g++ clangd clang-format \
     libx11-6 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 \
     libwayland-client0 libwayland-egl1 libvulkan1 mesa-vulkan-drivers
 ```
 
 | Package | Used by | For what |
 | --- | --- | --- |
-| `g++` | diagnostics | `-fsyntax-only` on the file being edited |
+| `g++` | the student | compiling and running, from the terminal |
+| `clangd` | diagnostics, hover, definition | the language server the editor talks to |
 | `clang-format` | Format selection | rewriting the selected lines |
 | `libx11-6`, `libxcursor1`, `libxi6` | window backend | window, mouse pointer, resize |
 | `libxkbcommon0`, `libxkbcommon-x11-0` | window backend | keyboard layout |
@@ -63,8 +67,12 @@ cargo run --release
 ### First run
 
 The program creates `~/.vrs` if it does not exist and uses it as the file
-panel: that is where student files go, outside the repository. The terminal
-pane runs `$SHELL`, falling back to `bash`. Nothing else to configure.
+panel: that is where student files go, outside the repository. Each folder in
+it is a project, and gets its own `clangd`. It also writes `~/.vrs/.clangd`
+(once) to give the language server the `-Wall -Wextra` warnings it does not
+enable by default; a `.clangd` of your own in a project adds to it. The
+terminal pane runs `$SHELL`, falling back to `bash`. Nothing else to
+configure.
 
 ## Keys
 
@@ -73,6 +81,7 @@ pane runs `$SHELL`, falling back to `bash`. Nothing else to configure.
 | `Ctrl+S` | save | sent to the shell |
 | `Ctrl+Q` | quit (asks to save) | sent to the shell |
 | `Ctrl+C` | copy (if a selection) | interrupt the running command |
+| `Ctrl+click` | follow the definition (`Cmd+click` on macOS) | |
 
 ## Design notes
 

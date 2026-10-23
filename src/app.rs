@@ -34,7 +34,7 @@ impl VrsApp {
         ctx.options_mut(|o| o.quit_shortcuts.clear());
         Self {
             files: FilePanel::new(root.clone()),
-            editor: Editor::new(),
+            editor: Editor::new(root.clone(), ctx.clone()),
             terminal: Terminal::new(&root, ctx.clone()),
             terminal_height: 220.0,
             pending_open: None,

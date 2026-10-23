@@ -1,8 +1,9 @@
 mod app;
-mod diagnostics;
+mod clangd;
 mod editor;
 mod files;
 mod format;
+mod language;
 mod strings;
 mod syntax;
 mod terminal;
